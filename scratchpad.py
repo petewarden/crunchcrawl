@@ -199,5 +199,117 @@ for zip_code, info in zip_counts.items():
     tooltip += ' - $'+intWithCommas(value)+' per person'
     writer.writerow([lat, lon, value, tooltip])
 
+import sys, string, json
+
+input = open('vcdata.txt', 'rb')
+
+vclist = []
+
+for line in input.readlines():
+    try:
+        current_parts = string.split(line, "\t", 1)
+        if len(current_parts) < 2:
+            continue
+            
+        current_key = current_parts[0]
+        current_data = json.loads(current_parts[1])
+        
+        investments = current_data['investments']
+        
+        total_investment_count = len(investments)
+        total_investment_amount = 0
+        for investment in investments:
+            total_investment_amount += investment['investment_amount']
+            
+        current_data['permalink'] = current_key
+        current_data['total_investment_count'] = total_investment_count
+        current_data['total_investment_amount'] = total_investment_amount
+        
+        vclist.append(current_data)
+        
+    except:
+        raise
+
+vc_by_count = sorted(vclist, key=lambda vc: vc['total_investment_count'])
+vc_by_count.reverse()
+vc_by_amount = sorted(vclist, key=lambda vc: vc['total_investment_amount'])
+vc_by_amount.reverse()
+
+wanted_vcs = {
+    'union-square-ventures': True,
+    'foundry-group': True
+}
+
+index = 0
+for vc in vc_by_count:
+    if index>=100:
+        break
+    index += 1
+    wanted_vcs[vc['permalink']] = True
+
+index = 0
+for vc in vc_by_amount:
+    if index>=100:
+        break
+    index += 1
+    wanted_vcs[vc['permalink']] = True
+
+import csv
+
+for vc in vclist:
+    permalink = vc['permalink']
+    if permalink not in wanted_vcs:
+        continue
+        
+    investments = vc['investments']
+    locations = {}
+    for investment in investments:
+        city = string.capwords(investment['city'].strip())
+        if city == '':
+            continue
+        state_code = string.capwords(investment['state_code'].strip())
+        country_code = string.upper(investment['country_code'].strip())
+        investment_amount = investment['investment_amount']
+        company_name = investment['company_name']
+        key = city+', '+state_code+', '+country_code
+        if key not in locations:
+            locations[key] = { 'amount': 0, 'companies': {}, 'city': city }
+        locations[key]['amount'] += investment_amount
+        locations[key]['companies'][company_name] = True
+    writer = csv.writer(open('mapfiles/'+permalink+'.csv', 'wb'))
+    writer.writerow(['location', 'value', 'tooltip'])
+    for location, info in locations.items():
+        amount = info['amount']
+        value = round(amount/1000000, 1)
+        city = info['city']
+        tooltip = city+' - '+str(value)+'m - '
+        tooltip += ', '.join(info['companies'].keys())
+        writer.writerow([location, value, tooltip])
+
+
+
+import sys, json, urllib, os
+
+default_settings = {"general":{"gradient_start_color":"#00f500","gradient_mid_color":"#00b800","gradient_end_color":"#006b00","author_name":"Pete Warden","author_url":"petewarden.typepad.com\/","key_description":"Investment amount (millions)","gradient_with_alpha":["#9300f500","#9300b800","#93006b00"],"details_value":0.42},"component":{"gradient_value_min":"0.0","gradient_value_max":"50","point_blob_radius":31.36,"title_text":"NA","point_drawing_shape":"circle","circle_line_color":0,"circle_line_alpha":1,"circle_line_thickness":1,"is_point_blob_radius_in_pixels":True},"way":{}}
+
+for vc in vclist:
+    permalink = vc['permalink']
+    if permalink not in wanted_vcs:
+        continue
+    csv_file = permalink+'.csv'
+    csv_path = 'mapfiles/'+csv_file
+    override_settings = default_settings
+    override_settings['component']['title_text'] = vc['name']
+    override_settings_string = urllib.quote(json.dumps(override_settings))
+    command_line = 'curl --data-binary @'+csv_path
+    command_line += ' --silent'
+    command_line += ' "http://www.openheatmap.com/uploadcsv.php?qqfile='+csv_file
+    command_line += '&disable_base64'
+    command_line += '&override_settings='+override_settings_string
+    command_line += '"'
+    command_line += ' > /tmp/foo.json'
+    error = os.system(command_line)
+    result = json.loads(open('/tmp/foo.json').read())
+    print '<tr><td><a href="http://www.openheatmap.comview.html?map='+result['output_id']+'">'+vc['name']+'</a></td><td><a href="http://www.crunchbase.com/financial-organization/'+vc['permalink']+'">'+str(vc['total_investment_count'])+' investments totalling '+str(round(vc['total_investment_amount']/1000000, 1))+'m</a></td></tr>'
 
 
